@@ -10,6 +10,23 @@
 `include "register_file.v"
 `include "sum.v"
 `include "Branch.v"
+`include "pcD.v"
+`include "pcIncD.v"
+`include "instD.v"
+`include "pcX.v"
+`include "pcIncX.v"
+`include "rs1X.v"
+`include "rs2X.v"
+`include "immX.v"
+`include "rdX.v"
+`include "pcIncM.v"
+`include "aluResM.v"
+`include "rs2M.v"
+`include "rdM.v"
+`include "pcIncWB.v"
+`include "dmOutWB.v"
+`include "aluResWB.v"
+`include "rdWB.v"
 
 module cu(
     input wire clk,
@@ -31,6 +48,31 @@ module cu(
     wire [31:0] DMDataOut;
     wire [31:0] MUX4out;
     wire branch_next;
+
+    // Etapa de Decode 
+    wire [31:0] PCDout;
+    wire [31:0] INSTDout;
+    wire [31:0] PCINCDout;
+
+    // Etapa de Execute
+    wire [31:0] PCXout;
+    wire [31:0] PCINCXout;
+    wire [31:0] RS1Xout;
+    wire [31:0] RS2Xout;
+    wire [31:0] IMMXout;
+    wire [4:0] RDXout;
+
+    //Etapa de Memory
+    wire [31:0] PCINCMout;
+    wire [31:0] ALURESMout;
+    wire [31:0] RS2Mout;
+    wire [4:0] RDMout;
+
+    //Etapa de Write Back
+    wire [31:0] PCINCWBout;
+    wire [31:0] DMOUTWBout;
+    wire [31:0] ALURESWBout;
+    wire [4:0] RDWBout;
 
     reg [1:0] MUX4control;
     reg MUX2control;
@@ -78,7 +120,7 @@ module cu(
     register_file rf(
         .RFr1(CUrs1), //Entrada del registro 1
         .RFr2(CUrs2), //Entrada del registro 2
-        .RFrd(CUrd), //Entrada del registro de destino
+        .RFrd(RDWBout), //Entrada del registro de destino
         .RFwr(MUX4out), //Entrada de los datos a escribir del mux 4
         .RFwenable(CUrenable), //Entrada de la señal de escritura
         .clk(clk), //Entrada de la señal de reloj 
@@ -88,30 +130,30 @@ module cu(
 
     //Unidad de inmediatos
     imm imm(
-        .IMMins(IMinstruction), //Entrada de la instrucción
+        .IMMins(INSTDout), //Entrada de la instrucción
         .IMMout(IMMout) //Salida del inmediato
     );
 
     //MUX pc and reg1
     mux_reg1_pc mux2(
-        .MUX2pc(PCout), //Entrada del contador de programa
-        .MUX2reg1(RFdata1), //Entrada del dato 1 del RegisterFile
+        .MUX2pc(PCXout), //Entrada del contador de programa
+        .MUX2reg1(RS1Xout), //Entrada del dato 1 del RegisterFile
         .MUX2control(MUX2control), //Entrada de la señal de control de la operación del MUX 2
         .MUX2out(MUX2out) //Salida del MUX 2
     );
 
     //MUX reg2 and imm
     mux_reg2_imm mux3(
-        .MUX3reg2(RFdata2), //Entrada del dato 2 del RegisterFile
-        .MUX3imm(IMMout), //Entrada del inmediato
+        .MUX3reg2(RS2Xout), //Entrada del dato 2 del RegisterFile
+        .MUX3imm(IMMXout), //Entrada del inmediato
         .MUX3control(MUX3control), //Entrada de la señal de control de la operación del MUX 3
         .MUX3out(MUX3out) //Salida del MUX 3
     );
 
     //BRANCH
     Branch branch(
-        .BRreg1(RFdata1), //Entrada del dato 1 del RegisterFile
-        .BRreg2(RFdata2), //Entrada del dato 2 del RegisterFile
+        .BRreg1(RS1Xout), //Entrada del dato 1 del RegisterFile
+        .BRreg2(RS2Xout), //Entrada del dato 2 del RegisterFile
         .BRopcode(BRopcode), //Entrada del opcode
         .branch_next(branch_next) //Salida de la señal de salto
     );  
@@ -126,8 +168,8 @@ module cu(
 
     //Data memory
     DataMemory dm(
-        .DMAddress(ALUresult), //Entrada de la dirección de memoria
-        .DMDataIn(RFdata2), //Entrada de los datos a escribir
+        .DMAddress(ALURESMout), //Entrada de la dirección de memoria
+        .DMDataIn(RS2Mout), //Entrada de los datos a escribir
         .DMCtrl(CUfunc3), //Entrada de la señal de control de la DM
         .DMWrEnable(CUdenable), //Entrada de la señal de escritura habilitada
         .DMDataOut(DMDataOut) //Salida de los datos leídos de la DM
@@ -135,25 +177,166 @@ module cu(
 
     //MUX alu and dm and sum
     mux_dm_alu_sum mux4(
-        .MUX4alu(ALUresult), //Entrada del resultado de la ALU
-        .MUX4dm(DMDataOut), //Entrada de los datos leídos de la DM
-        .MUX4sum(SUMout), //Entrada del contador de programa
+        .MUX4alu(ALURESWBout), //Entrada del resultado de la ALU
+        .MUX4dm(DMOUTWBout), //Entrada de los datos leídos de la DM
+        .MUX4sum(PCINCWBout), //Entrada del contador de programa
         .MUX4control(MUX4control), //Entrada de la señal de control de la operación del MUX 4
         .MUX4out(MUX4out) //Salida del MUX 4
     );
-    
+
+    //Etapa de Decode
+
+    //Program Counter Decode
+    pcD pcD(
+        .PCDout(PCDout), //Salida del contador de programa
+        .PCDdatain(PCout), //Entrada del contador de programa
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    //Instruction memory Decode
+    instD instD(
+        .INSTDout(INSTDout), //Salida de la instrucción
+        .INSTDdatain(IMinstruction), //Entrada de la instrucción
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    //Program Counter Increment Decode
+    pcIncD pcIncD(
+        .PCINCDout(PCINCDout), //Salida del contador de programa
+        .PCINCDdatain(PCout), //Entrada del contador de programa
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    //Etapa de Execute
+
+    //Program Counter Execute
+    pcX pcX(
+        .PCXout(PCXout), //Salida del contador de programa
+        .PCXdatain(PCDdatain), //Entrada del contador de programa
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    //Program Counter Increment Execute
+    pcIncX pcIncX(
+        .PCINCXout(PCINCXout), //Salida del contador de programa
+        .PCINCXdatain(PCINCDout), //Entrada del contador de programa
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    //Register 1 Execute
+    rs1X rs1X(
+        .RS1Xout(RS1Xout), //Salida del registro 1
+        .RS1Xdatain(RFdata1), //Entrada del dato 1 del RegisterFile
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    //Register 2 Execute
+    rs2X rs2X(
+        .RS2Xout(RS2Xout), //Salida del registro 2
+        .RS2Xdatain(RFdata2), //Entrada del dato 2 del RegisterFile
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    //Immediate Execute
+    immX immX(
+        .IMMXout(IMMXout), //Salida del inmediato
+        .IMMXdatain(IMMout), //Entrada de la instrucción
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    //Register destination Execute
+    rdX rdX(
+        .RDXout(RDXout), //Salida del registro de destino
+        .RDXdatain(CUrd), //Entrada del registro de destino
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    // Etapa de Memory
+
+    //Program Counter Increment Memory
+    pcIncM pcIncM(
+        .PCINCMout(PCINCMout), //Salida del contador de programa
+        .PCINCMdatain(PCINCXout), //Entrada del contador de programa
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    aluResM aluResM(
+        .ALURESMout(ALURESMout), //Salida del resultado de la ALU
+        .ALURESMdatain(ALUresult), //Entrada del resultado de la ALU
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio
+    );
+
+    rs2M rs2M(
+        .RS2Mout(RS2Mout), //Salida del registro 2
+        .RS2Mdatain(RS2Xout), //Entrada del dato 2 del RegisterFile
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio 
+    );
+
+    rdM rdM(
+        .RDMout(RDMout), //Salida del registro de destino
+        .RDMdatain(RDXout), //Entrada del registro de destino
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio 
+    );
+
+    // Etapa de Write Back
+
+    //Program Counter Increment Write Back
+    pcIncWB pcIncWB(
+        .PCINCWBout(PCINCWBout), //Salida del contador de programa
+        .PCINCWBdatain(PCINCMout), //Entrada del contador de programa
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio 
+    );
+
+    //Data memory Write Back
+    dmOutWB dmOutWB(
+        .DMOUTWBout(DMOUTWBout), //Salida de los datos leídos de la DM
+        .DMOUTWBdatain(DMDataOut), //Entrada de los datos leídos de la DM
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio 
+    );
+
+    //ALU Write Back
+    aluResWB aluResWB(
+        .ALURESWBout(ALURESWBout), //Salida del resultado de la ALU
+        .ALURESWBdatain(ALURESMout), //Entrada del resultado de la ALU
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio 
+    );
+
+    //Register destination Write Back
+    rdWB rdWB(
+        .RDWBout(RDWBout), //Salida del registro de destino
+        .RDWBdatain(RDMout), //Entrada del registro de destino
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset) //Entrada de la señal de reinicio 
+    );
+
     //Control unit
     always @(posedge clk) begin        // Cambiar a sensibilidad de flanco de subida
-    CUopcode = IMinstruction[6:0];
+    CUopcode = INSTDout[6:0];
     case(CUopcode)
         7'b0110011: begin          //INSTRUCCION TIPO R (OPCODE = 0110011)
-            CUrs1 = IMinstruction[19:15];
-            CUrs2 = IMinstruction[24:20];
-            CUrd = IMinstruction[11:7];
-            CUfunc3 = IMinstruction[14:12];
+            CUrs1 = INSTDout[19:15];
+            CUrs2 = INSTDout[24:20];
+            CUrd = INSTDout[11:7];
+            CUfunc3 = INSTDout[14:12];
             CUrenable = 1'b1;
             CUdenable = 1'b0;
-            CUsubsra = IMinstruction[30];
+            CUsubsra = INSTDout[30];
             MUX2control = 1'b1;
             MUX3control = 1'b0;
             MUX4control = 2'b01;
@@ -161,10 +344,10 @@ module cu(
         end
 
         7'b0010011: begin          //INSTRUCCION TIPO I (OPCODE = 0010011)
-            CUrs1 = IMinstruction[19:15];
+            CUrs1 = INSTDout[19:15];
             CUrs2 = 5'b0;
-            CUrd = IMinstruction[11:7];
-            CUfunc3 = IMinstruction[14:12];
+            CUrd = INSTDout[11:7];
+            CUfunc3 = INSTDout[14:12];
             CUrenable = 1'b1;
             CUdenable = 1'b0;
             CUsubsra = 1'b0;
@@ -175,10 +358,10 @@ module cu(
         end
 
         7'b0000011: begin          //INSTRUCCION TIPO I (OPCODE = 0000011)
-            CUrs1 = IMinstruction[19:15];
+            CUrs1 = INSTDout[19:15];
             CUrs2 = 5'b0;
-            CUrd = IMinstruction[11:7];
-            CUfunc3 = IMinstruction[14:12];
+            CUrd = INSTDout[11:7];
+            CUfunc3 = INSTDout[14:12];
             CUrenable = 1'b1;
             CUdenable = 1'b0;
             CUsubsra = 1'b0;
@@ -189,10 +372,10 @@ module cu(
         end
 
         7'b0100011: begin       //INSTRUCCION TIPO S (OPCODE = 0100011)
-            CUrs1 = IMinstruction[19:15];
-            CUrs2 = IMinstruction[24:20];
+            CUrs1 = INSTDout[19:15];
+            CUrs2 = INSTDout[24:20];
             CUrd = 5'b0;
-            CUfunc3 = IMinstruction[14:12];
+            CUfunc3 = INSTDout[14:12];
             CUrenable = 1'b0;
             CUdenable = 1'b1;
             CUsubsra = 1'b0;
@@ -203,17 +386,17 @@ module cu(
         end
 
         7'b1100011: begin       //INSTRUCCION TIPO SB (OPCODE = 1100011)
-            CUrs1 = IMinstruction[19:15];
-            CUrs2 = IMinstruction[24:20];
+            CUrs1 = INSTDout[19:15];
+            CUrs2 = INSTDout[24:20];
             CUrd = 5'b0;
-            CUfunc3 = IMinstruction[14:12];
+            CUfunc3 = INSTDout[14:12];
             CUrenable = 1'b0;
             CUdenable = 1'b0;
             CUsubsra = 1'b0;
             MUX2control = 1'b0;
             MUX3control = 1'b1;
             MUX4control = 2'b01;
-            BRopcode = IMinstruction[14:12];
+            BRopcode = INSTDout[14:12];
             // case (CUfunc3)
             //     3'b000: begin
             //         BRopcode = 5'b00000;
@@ -236,9 +419,9 @@ module cu(
             // endcase
         end
         7'b1100111: begin       //INSTRUCCION TIPO JALR (OPCODE = 1100111)
-            CUrs1 = IMinstruction[19:15];
+            CUrs1 = INSTDout[19:15];
             CUrs2 = 5'b0;
-            CUrd = IMinstruction[11:7];
+            CUrd = INSTDout[11:7];
             CUfunc3 = 3'b0;    
             CUrenable = 1'b1;
             CUdenable = 1'b0;
@@ -251,7 +434,7 @@ module cu(
         7'b1101111: begin       //INSTRUCCION TIPO JAL(OPCODE = 1101111)
             CUrs1 = 5'b0;
             CUrs2 = 5'b0;
-            CUrd = IMinstruction[11:7];
+            CUrd = INSTDout[11:7];
             CUfunc3 = 3'b0;    
             CUrenable = 1'b1;
             CUdenable = 1'b0;
@@ -264,7 +447,7 @@ module cu(
         7'b0110111: begin       //INSTRUCCION TIPO U LUI (OPCODE = 0110111)
             CUrs1 = 5'b0;
             CUrs2 = 5'b0;
-            CUrd = IMinstruction[11:7];
+            CUrd = INSTDout[11:7];
             CUfunc3 = 3'b0;    
             CUrenable = 1'b1;
             CUdenable = 1'b0;
@@ -277,7 +460,7 @@ module cu(
         7'b0010111: begin       //INSTRUCCION TIPO U AUIPC (OPCODE = 0010111)
             CUrs1 = 5'b0;
             CUrs2 = 5'b0;
-            CUrd = IMinstruction[11:7];
+            CUrd = INSTDout[11:7];
             CUfunc3 = 3'b0;    
             CUrenable = 1'b1;
             CUdenable = 1'b0;
@@ -289,10 +472,10 @@ module cu(
         end
 
         7'b1100111: begin      //INSTRUCCION TIPO I (OPCODE = 1100111)
-            CUrs1 = IMinstruction[19:15];
+            CUrs1 = INSTDout[19:15];
             CUrs2 = 5'b0;
-            CUrd = IMinstruction[11:7];
-            CUfunc3 = IMinstruction[14:12];
+            CUrd = INSTDout[11:7];
+            CUfunc3 = INSTDout[14:12];
             CUrenable = 1'b1;
             CUdenable = 1'b0;
             CUsubsra = 1'b0;
@@ -305,7 +488,7 @@ module cu(
         7'b1101111: begin      //INSTRUCCION TIPO J (OPCODE = 1101111)
             CUrs1 = 5'b0;
             CUrs2 = 5'b0;
-            CUrd = IMinstruction[11:7];
+            CUrd = INSTDout[11:7];
             CUfunc3 = 3'b0;
             CUrenable = 1'b1;
             CUdenable = 1'b0;
