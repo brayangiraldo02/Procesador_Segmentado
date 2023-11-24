@@ -14,16 +14,19 @@
 `include "pcIncD.v"
 `include "instD.v"
 `include "pcX.v"
+`include "cuX.v"
 `include "pcIncX.v"
 `include "rs1X.v"
 `include "rs2X.v"
 `include "immX.v"
 `include "rdX.v"
 `include "pcIncM.v"
+`include "cuM.v"
 `include "aluResM.v"
 `include "rs2M.v"
 `include "rdM.v"
 `include "pcIncWB.v"
+`include "cuWB.v"
 `include "dmOutWB.v"
 `include "aluResWB.v"
 `include "rdWB.v"
@@ -61,18 +64,24 @@ module cu(
     wire [31:0] RS2Xout;
     wire [31:0] IMMXout;
     wire [4:0] RDXout;
+    wire [6:0] CUXopcode;
+    wire [2:0] CUXfunc3;
+    wire CUXsubsra;
 
     //Etapa de Memory
     wire [31:0] PCINCMout;
     wire [31:0] ALURESMout;
     wire [31:0] RS2Mout;
     wire [4:0] RDMout;
+    wire [6:0] CUMopcode;
+    wire [2:0] CUMfunc3;
 
     //Etapa de Write Back
     wire [31:0] PCINCWBout;
     wire [31:0] DMOUTWBout;
     wire [31:0] ALURESWBout;
     wire [4:0] RDWBout;
+    wire [6:0] CUWBopcode;
 
     reg [1:0] MUX4control;
     reg MUX2control;
@@ -161,8 +170,8 @@ module cu(
     alu alu(
         .ALUop1(MUX2out), //Entrada del operando 1 del MUX 2
         .ALUop2(MUX3out), //Entrada del operando 2 del MUX 3
-        .ALUfunc3(CUfunc3), //Entrada de la señal de control func3 de la operación de la ALU
-        .ALUsubsra(CUsubsra), //Entrada de la señal de control func7 de la operación de la ALU
+        .ALUfunc3(CUXfunc3), //Entrada de la señal de control func3 de la operación de la ALU
+        .ALUsubsra(CUXsubsra), //Entrada de la señal de control func7 de la operación de la ALU
         .ALUresult(ALUresult) //Salida del resultado de la ALU
     );
 
@@ -170,7 +179,7 @@ module cu(
     DataMemory dm(
         .DMAddress(ALURESMout), //Entrada de la dirección de memoria
         .DMDataIn(RS2Mout), //Entrada de los datos a escribir
-        .DMCtrl(CUfunc3), //Entrada de la señal de control de la DM
+        .DMCtrl(CUMfunc3), //Entrada de la señal de control de la DM
         .DMWrEnable(CUdenable), //Entrada de la señal de escritura habilitada
         .DMDataOut(DMDataOut) //Salida de los datos leídos de la DM
     );
@@ -215,7 +224,7 @@ module cu(
     //Program Counter Execute
     pcX pcX(
         .PCXout(PCXout), //Salida del contador de programa
-        .PCXdatain(PCDdatain), //Entrada del contador de programa
+        .PCXdatain(PCDout), //Entrada del contador de programa
         .clk(clk), //Entrada de la señal de reloj
         .reset(reset) //Entrada de la señal de reinicio
     );
@@ -260,6 +269,18 @@ module cu(
         .reset(reset) //Entrada de la señal de reinicio
     );
 
+    //Control unit Execute
+    cuX cuX(
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset), //Entrada de la señal de reinicio
+        .CUXopcodeInput(CUopcode), //Entrada del opcode
+        .CUXfunc3Input(CUfunc3), //Entrada de func3
+        .CUXsubsraInput(CUsubsra), //Entrada de subsra
+        .CUXopcode(CUXopcode), //Salida del opcode
+        .CUXfunc3(CUXfunc3), //Salida de func3
+        .CUXsubsra(CUXsubsra) //Salida de subsra
+    );
+
     // Etapa de Memory
 
     //Program Counter Increment Memory
@@ -289,6 +310,15 @@ module cu(
         .RDMdatain(RDXout), //Entrada del registro de destino
         .clk(clk), //Entrada de la señal de reloj
         .reset(reset) //Entrada de la señal de reinicio 
+    );
+
+    cuM cuM(
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset), //Entrada de la señal de reinicio
+        .CUMopcodeInput(CUXopcode), //Entrada del opcode
+        .CUMfunc3Input(CUXfunc3), //Entrada de func3
+        .CUMopcode(CUMopcode), //Salida del opcode
+        .CUMfunc3(CUMfunc3) //Salida de func3
     );
 
     // Etapa de Write Back
@@ -325,185 +355,444 @@ module cu(
         .reset(reset) //Entrada de la señal de reinicio 
     );
 
+    cuWB cuWB(
+        .clk(clk), //Entrada de la señal de reloj
+        .reset(reset), //Entrada de la señal de reinicio
+        .CUWBopcodeInput(CUMopcode), //Entrada del opcode
+        .CUWBopcode(CUWBopcode) //Salida del opcode
+    );
+
+    //Always para la etapa del Decode
+    always @(posedge clk) begin
+        CUopcode = INSTDout[6:0];
+        CUfunc3 = INSTDout[14:12];
+        CUsubsra = INSTDout[30];
+        CUrd = INSTDout[11:7];
+
+        case(CUopcode)
+            7'b0110011: begin //INSTRUCCION TIPO R
+                CUrs1 = INSTDout[19:15];
+                CUrs2 = INSTDout[24:20];
+            end
+
+            7'b0010011: begin //INSTRUCCION TIPO I      
+                CUrs1 = INSTDout[19:15];
+                CUrs2 = 5'b0;
+            end
+
+            7'b0000011: begin          //INSTRUCCION TIPO I (OPCODE = 0000011)
+                CUrs1 = INSTDout[19:15];
+                CUrs2 = 5'b0;
+            end
+
+            7'b0100011: begin       //INSTRUCCION TIPO S (OPCODE = 0100011)
+                CUrs1 = INSTDout[19:15];
+                CUrs2 = INSTDout[24:20];
+            end
+            
+            7'b1100011: begin       //INSTRUCCION TIPO SB (OPCODE = 1100011)
+                CUrs1 = INSTDout[19:15];
+                CUrs2 = INSTDout[24:20];
+            end
+
+            7'b1100111: begin       //INSTRUCCION TIPO JALR (OPCODE = 1100111)
+                CUrs1 = INSTDout[19:15];
+                CUrs2 = 5'b0;
+            end
+
+            7'b1101111: begin       //INSTRUCCION TIPO JAL(OPCODE = 1101111)
+                CUrs1 = 5'b0;
+                CUrs2 = 5'b0;
+            end
+
+            7'b0110111: begin       //INSTRUCCION TIPO U LUI (OPCODE = 0110111)
+                CUrs1 = 5'b0;
+                CUrs2 = 5'b0;
+            end
+
+            7'b0010111: begin       //INSTRUCCION TIPO U AUIPC (OPCODE = 0010111)
+                CUrs1 = 5'b0;
+                CUrs2 = 5'b0;
+            end
+
+            7'b1100111: begin      //INSTRUCCION TIPO I (OPCODE = 1100111)
+                CUrs1 = INSTDout[19:15];
+                CUrs2 = 5'b0;
+            end
+
+            7'b1101111: begin      //INSTRUCCION TIPO J (OPCODE = 1101111)
+                CUrs1 = 5'b0;
+                CUrs2 = 5'b0;
+            end
+        endcase
+    end
+
+    //Always para la etapa del Execute
+    always @(posedge clk) begin
+        case(CUXopcode)
+            7'b0110011: begin //INSTRUCCION TIPO R
+                BRopcode = 5'b11111;
+                MUX2control = 1'b1;
+                MUX3control = 1'b0;
+            end
+
+            7'b0010011: begin //INSTRUCCION TIPO I      
+                BRopcode = 5'b11111;
+                MUX2control = 1'b1;
+                MUX3control = 1'b1;
+            end
+
+            7'b0000011: begin          //INSTRUCCION TIPO I (OPCODE = 0000011)
+                BRopcode = 5'b11111;
+                MUX2control = 1'b1;
+                MUX3control = 1'b1;
+            end
+
+            7'b0100011: begin       //INSTRUCCION TIPO S (OPCODE = 0100011)
+                BRopcode = 5'b11111;
+                MUX2control = 1'b1;
+                MUX3control = 1'b1;
+            end
+            
+            7'b1100011: begin       //INSTRUCCION TIPO SB (OPCODE = 1100011)
+                BRopcode = CUXfunc3;
+                MUX2control = 1'b0;
+                MUX3control = 1'b1;
+            end
+
+            7'b1100111: begin       //INSTRUCCION TIPO JALR (OPCODE = 1100111)
+                BRopcode = 5'b01111;
+                MUX2control = 1'b1;
+                MUX3control = 1'b1;
+            end
+
+            7'b1101111: begin       //INSTRUCCION TIPO JAL(OPCODE = 1101111)
+                BRopcode = 5'b01111;
+                MUX2control = 1'b0;
+                MUX3control = 1'b1;
+            end
+
+            7'b0110111: begin       //INSTRUCCION TIPO U LUI (OPCODE = 0110111)
+                BRopcode = 5'b11111;
+                MUX2control = 1'b0;
+                MUX3control = 1'b1;
+            end
+
+            7'b0010111: begin       //INSTRUCCION TIPO U AUIPC (OPCODE = 0010111)
+                BRopcode = 5'b11111;
+                MUX2control = 1'b0;
+                MUX3control = 1'b1;
+            end
+
+            7'b1100111: begin      //INSTRUCCION TIPO I (OPCODE = 1100111)
+                BRopcode = 5'b01111;
+                MUX2control = 1'b1;
+                MUX3control = 1'b1;
+            end
+
+            7'b1101111: begin      //INSTRUCCION TIPO J (OPCODE = 1101111)
+                BRopcode = 5'b01111;
+                MUX2control = 1'b0;
+                MUX3control = 1'b1;
+            end
+        endcase
+    end
+
+    //Always para la etapa de Memory
+    always @(posedge clk) begin
+        case(CUMopcode)
+            7'b0110011: begin //INSTRUCCION TIPO R
+                CUdenable = 1'b0;
+            end
+
+            7'b0010011: begin //INSTRUCCION TIPO I      
+                CUdenable = 1'b0;
+            end
+
+            7'b0000011: begin          //INSTRUCCION TIPO I (OPCODE = 0000011)
+                CUdenable = 1'b0;
+            end
+
+            7'b0100011: begin       //INSTRUCCION TIPO S (OPCODE = 0100011)
+                CUdenable = 1'b1;
+            end
+            
+            7'b1100011: begin       //INSTRUCCION TIPO SB (OPCODE = 1100011)
+                CUdenable = 1'b0;
+            end
+
+            7'b1100111: begin       //INSTRUCCION TIPO JALR (OPCODE = 1100111)
+                CUdenable = 1'b0;
+            end
+
+            7'b1101111: begin       //INSTRUCCION TIPO JAL(OPCODE = 1101111)
+                CUdenable = 1'b0;
+            end
+
+            7'b0110111: begin       //INSTRUCCION TIPO U LUI (OPCODE = 0110111)
+                CUdenable = 1'b0;
+            end
+
+            7'b0010111: begin       //INSTRUCCION TIPO U AUIPC (OPCODE = 0010111)
+                CUdenable = 1'b0;
+            end
+
+            7'b1100111: begin      //INSTRUCCION TIPO I (OPCODE = 1100111)
+                CUdenable = 1'b0;
+            end
+
+            7'b1101111: begin      //INSTRUCCION TIPO J (OPCODE = 1101111)
+                CUdenable = 1'b0;
+            end
+
+            7'b0000000: begin
+                CUdenable = 1'b0;
+        end
+        endcase
+    end
+    
+    //Always para la etapa de Write Back
+    always @(posedge clk) begin
+        case(CUWBopcode)
+            7'b0110011: begin //INSTRUCCION TIPO R
+                CUrenable = 1'b1;
+                MUX4control = 2'b01;
+            end
+
+            7'b0010011: begin //INSTRUCCION TIPO I      
+                CUrenable = 1'b1;
+                MUX4control = 2'b01;
+            end
+
+            7'b0000011: begin          //INSTRUCCION TIPO I (OPCODE = 0000011)
+                CUrenable = 1'b1;
+                MUX4control = 2'b00;
+            end
+
+            7'b0100011: begin       //INSTRUCCION TIPO S (OPCODE = 0100011)
+                CUrenable = 1'b0;
+                MUX4control = 2'b00;
+            end
+            
+            7'b1100011: begin       //INSTRUCCION TIPO SB (OPCODE = 1100011)
+                CUrenable = 1'b0;
+                MUX4control = 2'b01;
+            end
+
+            7'b1100111: begin       //INSTRUCCION TIPO JALR (OPCODE = 1100111)
+                CUrenable = 1'b1;
+                MUX4control = 2'b10;
+            end
+
+            7'b1101111: begin       //INSTRUCCION TIPO JAL(OPCODE = 1101111)
+                CUrenable = 1'b1;
+                MUX4control = 2'b10;
+            end
+
+            7'b0110111: begin       //INSTRUCCION TIPO U LUI (OPCODE = 0110111)
+                CUrenable = 1'b1;
+                MUX4control = 2'b01;
+            end
+
+            7'b0010111: begin       //INSTRUCCION TIPO U AUIPC (OPCODE = 0010111)
+                CUrenable = 1'b1;
+                MUX4control = 2'b01;
+            end
+
+            7'b1100111: begin      //INSTRUCCION TIPO I (OPCODE = 1100111)
+                CUrenable = 1'b1;
+                MUX4control = 2'b10;
+            end
+
+            7'b1101111: begin      //INSTRUCCION TIPO J (OPCODE = 1101111)
+                CUrenable = 1'b1;
+                MUX4control = 2'b10;
+            end
+
+            7'b0000000: begin
+                CUrenable = 1'b0;
+        end
+        endcase
+    end
     //Control unit
-    always @(posedge clk) begin        // Cambiar a sensibilidad de flanco de subida
-    CUopcode = INSTDout[6:0];
-    case(CUopcode)
-        7'b0110011: begin          //INSTRUCCION TIPO R (OPCODE = 0110011)
-            CUrs1 = INSTDout[19:15];
-            CUrs2 = INSTDout[24:20];
-            CUrd = INSTDout[11:7];
-            CUfunc3 = INSTDout[14:12];
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = INSTDout[30];
-            MUX2control = 1'b1;
-            MUX3control = 1'b0;
-            MUX4control = 2'b01;
-            BRopcode = 5'b11111;
-        end
+//     always @(posedge clk) begin        // Cambiar a sensibilidad de flanco de subida
+//     CUopcode = INSTDout[6:0];
+//     case(CUopcode)
+//         7'b0110011: begin          //INSTRUCCION TIPO R (OPCODE = 0110011)
+//             CUrs1 = INSTDout[19:15];
+//             CUrs2 = INSTDout[24:20];
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = INSTDout[14:12];
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = INSTDout[30];
+//             MUX2control = 1'b1;
+//             MUX3control = 1'b0;
+//             MUX4control = 2'b01;
+//             BRopcode = 5'b11111;
+//         end
 
-        7'b0010011: begin          //INSTRUCCION TIPO I (OPCODE = 0010011)
-            CUrs1 = INSTDout[19:15];
-            CUrs2 = 5'b0;
-            CUrd = INSTDout[11:7];
-            CUfunc3 = INSTDout[14:12];
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b1;
-            MUX3control = 1'b1;
-            MUX4control = 2'b01;
-            BRopcode = 5'b11111;
-        end
+//         7'b0010011: begin          //INSTRUCCION TIPO I (OPCODE = 0010011)
+//             CUrs1 = INSTDout[19:15];
+//             CUrs2 = 5'b0;
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = INSTDout[14:12];
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b1;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b01;
+//             BRopcode = 5'b11111;
+//         end
 
-        7'b0000011: begin          //INSTRUCCION TIPO I (OPCODE = 0000011)
-            CUrs1 = INSTDout[19:15];
-            CUrs2 = 5'b0;
-            CUrd = INSTDout[11:7];
-            CUfunc3 = INSTDout[14:12];
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b1;
-            MUX3control = 1'b1;
-            MUX4control = 2'b00;
-            BRopcode = 5'b11111;
-        end
+//         7'b0000011: begin          //INSTRUCCION TIPO I (OPCODE = 0000011)
+//             CUrs1 = INSTDout[19:15];
+//             CUrs2 = 5'b0;
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = INSTDout[14:12];
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b1;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b00;
+//             BRopcode = 5'b11111;
+//         end
 
-        7'b0100011: begin       //INSTRUCCION TIPO S (OPCODE = 0100011)
-            CUrs1 = INSTDout[19:15];
-            CUrs2 = INSTDout[24:20];
-            CUrd = 5'b0;
-            CUfunc3 = INSTDout[14:12];
-            CUrenable = 1'b0;
-            CUdenable = 1'b1;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b1;
-            MUX3control = 1'b1;
-            MUX4control = 2'b00;
-            BRopcode = 5'b11111;
-        end
+//         7'b0100011: begin       //INSTRUCCION TIPO S (OPCODE = 0100011)
+//             CUrs1 = INSTDout[19:15];
+//             CUrs2 = INSTDout[24:20];
+//             CUrd = 5'b0;
+//             CUfunc3 = INSTDout[14:12];
+//             CUrenable = 1'b0;
+//             CUdenable = 1'b1;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b1;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b00;
+//             BRopcode = 5'b11111;
+//         end
 
-        7'b1100011: begin       //INSTRUCCION TIPO SB (OPCODE = 1100011)
-            CUrs1 = INSTDout[19:15];
-            CUrs2 = INSTDout[24:20];
-            CUrd = 5'b0;
-            CUfunc3 = INSTDout[14:12];
-            CUrenable = 1'b0;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b0;
-            MUX3control = 1'b1;
-            MUX4control = 2'b01;
-            BRopcode = INSTDout[14:12];
-            // case (CUfunc3)
-            //     3'b000: begin
-            //         BRopcode = 5'b00000;
-            //     end
-            //     3'b001: begin
-            //         BRopcode = 5'b00001;
-            //     end
-            //     3'b100: begin
-            //         BRopcode = 5'b00100;
-            //     end
-            //     3'b101: begin
-            //         BRopcode = 5'b00101;
-            //     end
-            //     3'b110: begin
-            //         BRopcode = 5'b00110;
-            //     end
-            //     3'b111: begin
-            //         BRopcode = 5'b00111;
-            //     end
-            // endcase
-        end
-        7'b1100111: begin       //INSTRUCCION TIPO JALR (OPCODE = 1100111)
-            CUrs1 = INSTDout[19:15];
-            CUrs2 = 5'b0;
-            CUrd = INSTDout[11:7];
-            CUfunc3 = 3'b0;    
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b1;
-            MUX3control = 1'b1;
-            MUX4control = 2'b10;
-            BRopcode = 5'b01111;
-        end
-        7'b1101111: begin       //INSTRUCCION TIPO JAL(OPCODE = 1101111)
-            CUrs1 = 5'b0;
-            CUrs2 = 5'b0;
-            CUrd = INSTDout[11:7];
-            CUfunc3 = 3'b0;    
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b0;
-            MUX3control = 1'b1;
-            MUX4control = 2'b10;
-            BRopcode = 5'b01111;
-        end
-        7'b0110111: begin       //INSTRUCCION TIPO U LUI (OPCODE = 0110111)
-            CUrs1 = 5'b0;
-            CUrs2 = 5'b0;
-            CUrd = INSTDout[11:7];
-            CUfunc3 = 3'b0;    
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b0;
-            MUX3control = 1'b1;
-            MUX4control = 2'b01;
-            BRopcode = 5'b11111;
-        end
-        7'b0010111: begin       //INSTRUCCION TIPO U AUIPC (OPCODE = 0010111)
-            CUrs1 = 5'b0;
-            CUrs2 = 5'b0;
-            CUrd = INSTDout[11:7];
-            CUfunc3 = 3'b0;    
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b0;
-            MUX3control = 1'b1;
-            MUX4control = 2'b01;
-            BRopcode = 5'b11111;
-        end
+//         7'b1100011: begin       //INSTRUCCION TIPO SB (OPCODE = 1100011)
+//             CUrs1 = INSTDout[19:15];
+//             CUrs2 = INSTDout[24:20];
+//             CUrd = 5'b0;
+//             CUfunc3 = INSTDout[14:12];
+//             CUrenable = 1'b0;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b0;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b01;
+//             BRopcode = INSTDout[14:12];
+//             // case (CUfunc3)
+//             //     3'b000: begin
+//             //         BRopcode = 5'b00000;
+//             //     end
+//             //     3'b001: begin
+//             //         BRopcode = 5'b00001;
+//             //     end
+//             //     3'b100: begin
+//             //         BRopcode = 5'b00100;
+//             //     end
+//             //     3'b101: begin
+//             //         BRopcode = 5'b00101;
+//             //     end
+//             //     3'b110: begin
+//             //         BRopcode = 5'b00110;
+//             //     end
+//             //     3'b111: begin
+//             //         BRopcode = 5'b00111;
+//             //     end
+//             // endcase
+//         end
+//         7'b1100111: begin       //INSTRUCCION TIPO JALR (OPCODE = 1100111)
+//             CUrs1 = INSTDout[19:15];
+//             CUrs2 = 5'b0;
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = 3'b0;    
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b1;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b10;
+//             BRopcode = 5'b01111;
+//         end
+//         7'b1101111: begin       //INSTRUCCION TIPO JAL(OPCODE = 1101111)
+//             CUrs1 = 5'b0;
+//             CUrs2 = 5'b0;
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = 3'b0;    
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b0;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b10;
+//             BRopcode = 5'b01111;
+//         end
+//         7'b0110111: begin       //INSTRUCCION TIPO U LUI (OPCODE = 0110111)
+//             CUrs1 = 5'b0;
+//             CUrs2 = 5'b0;
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = 3'b0;    
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b0;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b01;
+//             BRopcode = 5'b11111;
+//         end
+//         7'b0010111: begin       //INSTRUCCION TIPO U AUIPC (OPCODE = 0010111)
+//             CUrs1 = 5'b0;
+//             CUrs2 = 5'b0;
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = 3'b0;    
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b0;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b01;
+//             BRopcode = 5'b11111;
+//         end
 
-        7'b1100111: begin      //INSTRUCCION TIPO I (OPCODE = 1100111)
-            CUrs1 = INSTDout[19:15];
-            CUrs2 = 5'b0;
-            CUrd = INSTDout[11:7];
-            CUfunc3 = INSTDout[14:12];
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b1;
-            MUX3control = 1'b1;
-            MUX4control = 2'b10;
-            BRopcode = 5'b01111;
-        end
+//         7'b1100111: begin      //INSTRUCCION TIPO I (OPCODE = 1100111)
+//             CUrs1 = INSTDout[19:15];
+//             CUrs2 = 5'b0;
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = INSTDout[14:12];
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b1;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b10;
+//             BRopcode = 5'b01111;
+//         end
 
-        7'b1101111: begin      //INSTRUCCION TIPO J (OPCODE = 1101111)
-            CUrs1 = 5'b0;
-            CUrs2 = 5'b0;
-            CUrd = INSTDout[11:7];
-            CUfunc3 = 3'b0;
-            CUrenable = 1'b1;
-            CUdenable = 1'b0;
-            CUsubsra = 1'b0;
-            MUX2control = 1'b0;
-            MUX3control = 1'b1;
-            MUX4control = 2'b10;
-            BRopcode = 5'b01111;
-        end
+//         7'b1101111: begin      //INSTRUCCION TIPO J (OPCODE = 1101111)
+//             CUrs1 = 5'b0;
+//             CUrs2 = 5'b0;
+//             CUrd = INSTDout[11:7];
+//             CUfunc3 = 3'b0;
+//             CUrenable = 1'b1;
+//             CUdenable = 1'b0;
+//             CUsubsra = 1'b0;
+//             MUX2control = 1'b0;
+//             MUX3control = 1'b1;
+//             MUX4control = 2'b10;
+//             BRopcode = 5'b01111;
+//         end
 
-        7'b0000000: begin
-            CUrenable = 1'b0;
-            CUdenable = 1'b0;
-        end
-    endcase 
-end
+//         7'b0000000: begin
+//             CUrenable = 1'b0;
+//             CUdenable = 1'b0;
+//         end
+//     endcase 
+// end
 
 endmodule
