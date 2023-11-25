@@ -547,7 +547,7 @@ module cu(
 
             7'b0000000: begin
                 CUdenable = 1'b0;
-        end
+            end
         endcase
     end
     
